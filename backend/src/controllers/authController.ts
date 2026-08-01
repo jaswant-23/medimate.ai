@@ -716,7 +716,7 @@ export const updateProfileMember = async (req: AuthRequest, res: Response): Prom
       return;
     }
 
-    const { id } = req.params;
+    const { id } = req.params as { id: string };
     const { fullName, relation, dob, gender, photoUrl } = req.body;
 
     const profile = await prisma.profile.findFirst({
@@ -767,7 +767,7 @@ export const deleteProfile = async (req: AuthRequest, res: Response): Promise<vo
       return;
     }
 
-    const { id } = req.params;
+    const { id } = req.params as { id: string };
 
     const profile = await prisma.profile.findFirst({
       where: { id, ownerId: user.id }

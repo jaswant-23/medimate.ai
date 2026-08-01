@@ -1,4 +1,5 @@
 import nodemailer from 'nodemailer';
+import SMTPTransport from 'nodemailer/lib/smtp-transport';
 
 // Create a reusable transporter using default SMTP transport
 // or actual SMTP settings from environment variables if provided.
@@ -10,15 +11,19 @@ export const getTransporter = () => {
   const port = parseInt(process.env.SMTP_PORT || '587');
   const defaultHost = process.env.SMTP_USER.endsWith('@gmail.com') ? 'smtp.gmail.com' : 'smtp.ethereal.email';
   
-  return nodemailer.createTransport({
+  const options: SMTPTransport.Options = {
     host: process.env.SMTP_HOST || defaultHost,
     port,
     secure: port === 465, // true for 465, false for other ports
+    // @ts-ignore - family is not in types but works for node net.Socket to force IPv4
+    family: 4,
     auth: {
       user: process.env.SMTP_USER,
       pass: process.env.SMTP_PASS,
     },
-  });
+  };
+
+  return nodemailer.createTransport(options);
 };
 
 export const sendVerificationEmail = async (email: string, token: string) => {
