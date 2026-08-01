@@ -25,7 +25,7 @@ export const sendVerificationEmail = async (email: string, token: string) => {
   const transporter = getTransporter();
   
   // Use frontend URL if available, else fallback
-  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+  const frontendUrl = process.env.FRONTEND_URL || 'https://medimate-ai-frontend.onrender.com';
   const verificationLink = `${frontendUrl}/verify-email?token=${token}`;
 
   const fromEmail = process.env.SMTP_USER || 'noreply@medimate.local';
@@ -58,7 +58,7 @@ export const sendVerificationEmail = async (email: string, token: string) => {
 export const sendPasswordResetEmail = async (email: string, token: string) => {
   const transporter = getTransporter();
   
-  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+  const frontendUrl = process.env.FRONTEND_URL || 'https://medimate-ai-frontend.onrender.com';
   const resetLink = `${frontendUrl}/reset-password?token=${token}`;
   
   const fromEmail = process.env.SMTP_USER || 'noreply@medimate.local';

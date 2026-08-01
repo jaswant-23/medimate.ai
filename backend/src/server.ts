@@ -1,5 +1,5 @@
 import express from 'express';
-import cors from 'express';
+import cors from 'cors';
 import 'dotenv/config';
 import path from 'path';
 import authRoutes from './routes/authRoutes';
@@ -10,8 +10,10 @@ import refillRoutes from './routes/refillRoutes';
 const app = express();
 
 // Middleware
-const corsMiddleware = require('cors');
-app.use(corsMiddleware());
+app.use(cors({
+  origin: process.env.FRONTEND_URL || 'https://medimate-ai-frontend.onrender.com',
+  credentials: true
+}));
 app.use(express.json());
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
