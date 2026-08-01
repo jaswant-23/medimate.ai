@@ -66,7 +66,7 @@ export const Dashboard = () => {
   const fetchRefillAlerts = async (profileId: string) => {
     try {
       const token = useAuthStore.getState().token;
-      const res = await fetch(`http://localhost:5000/api/refills/profile/${profileId}`, {
+      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/refills/profile/${profileId}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (res.ok) {
@@ -82,7 +82,7 @@ export const Dashboard = () => {
   const handleUpdateAlertStatus = async (alertId: string, status: 'REORDERED' | 'SNOOZED' | 'DISMISSED') => {
     try {
       const token = useAuthStore.getState().token;
-      const res = await fetch(`http://localhost:5000/api/refills/${alertId}/status`, {
+      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/refills/${alertId}/status`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',

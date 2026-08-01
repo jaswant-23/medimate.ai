@@ -38,7 +38,7 @@ interface ReminderState {
   clearError: () => void;
 }
 
-const API_URL = 'http://localhost:5000/api/reminders';
+const API_URL = `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/reminders`;
 
 export const useReminderStore = create<ReminderState>()((set) => ({
   reminders: [],

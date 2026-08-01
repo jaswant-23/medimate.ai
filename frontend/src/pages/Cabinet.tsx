@@ -11,7 +11,7 @@ import { ReminderSetup } from '../components/ReminderSetup';
 import { useReminderStore } from '../store/useReminderStore';
 import { calculateStockStatus } from '../utils/stockCalc';
 
-const BACKEND_URL = 'http://localhost:5000';
+const BACKEND_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
 export const Cabinet = () => {
   const navigate = useNavigate();

@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { User, Phone, Globe, Clock, Loader2, Save, CheckCircle, Bell, Upload, Lock, Shield, Key, AlertTriangle, Settings, Users, Plus, Trash2, Edit3, X, LogOut } from 'lucide-react';
 import { useAuthStore } from '../store/useAuthStore';
 
-const BACKEND_URL = 'http://localhost:5000';
+const BACKEND_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
 export const Profile = () => {
   const [activeTab, setActiveTab] = useState<'profile' | 'password' | 'family'>('profile');
