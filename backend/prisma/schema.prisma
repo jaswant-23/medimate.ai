@@ -1,0 +1,575 @@
+// ==========================================================================
+// MediMate — Core (Non-AI) Database Schema
+// Prisma + PostgreSQL
+// Organized to mirror the Phase-Wise Implementation Plan.
+// ==========================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ==========================================================================
+// PHASE 1 — AUTHENTICATION & USER MANAGEMENT
+// ==========================================================================
+
+model User {
+  id                String    @id @default(cuid())
+  email             String?   @unique
+  phone             String?   @unique
+  passwordHash      String?
+  fullName          String
+  photoUrl          String?
+  dob               DateTime?
+  gender            Gender?
+  address           String?
+  preferredLanguage String    @default("en")
+  preferredUnits    String    @default("metric") // "metric" | "imperial"
+  theme             Theme     @default(LIGHT)
+  isEmailVerified   Boolean   @default(false)
+  isPhoneVerified   Boolean   @default(false)
+  isActive          Boolean   @default(true)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  profiles             Profile[]
+  sessions             Session[]
+  otpVerifications     OtpVerification[]
+  notificationPref     NotificationPreference?
+  donationsGiven       Donation[]         @relation("DonorUser")
+  donationsReserved    Donation[]         @relation("ReservedByUser")
+  donationRequests     DonationRequest[]
+  ratingsGiven         Rating[]           @relation("RatingGiver")
+  ratingsReceived      Rating[]           @relation("RatingReceiver")
+
+  @@index([email])
+  @@index([phone])
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+  PREFER_NOT_TO_SAY
+}
+
+enum Theme {
+  LIGHT
+  DARK
+  AMOLED
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  refreshToken String   @unique
+  userAgent    String?
+  ipAddress    String?
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+
+  @@index([userId])
+}
+
+model OtpVerification {
+  id         String     @id @default(cuid())
+  userId     String?
+  user       User?      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  identifier String     // email or phone the OTP was sent to
+  otpCode    String
+  purpose    OtpPurpose
+  isVerified Boolean    @default(false)
+  expiresAt  DateTime
+  createdAt  DateTime   @default(now())
+
+  @@index([identifier])
+}
+
+enum OtpPurpose {
+  SIGNUP
+  LOGIN
+  PASSWORD_RESET
+  PHONE_VERIFICATION
+}
+
+model NotificationPreference {
+  id                 String   @id @default(cuid())
+  userId             String   @unique
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  medicineReminders  Boolean  @default(true)
+  stockAlerts        Boolean  @default(true)
+  expiryAlerts       Boolean  @default(true)
+  refillAlerts       Boolean  @default(true)
+  donationAlerts     Boolean  @default(true)
+  calendarReminders  Boolean  @default(true)
+  quietHoursStart    String?  // e.g. "22:00"
+  quietHoursEnd      String?  // e.g. "07:00"
+  expiryThreshold    Int      @default(30)
+}
+
+// ==========================================================================
+// PHASE 5 — FAMILY / PROFILE MANAGEMENT
+// (Profile sits between User and all health data — "self" is a Profile too)
+// ==========================================================================
+
+model Profile {
+  id        String          @id @default(cuid())
+  ownerId   String
+  owner     User            @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  relation  ProfileRelation @default(SELF)
+  fullName  String
+  photoUrl  String?
+  dob       DateTime?
+  gender    Gender?
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+
+  medicines        Medicine[]
+  reminders        Reminder[]
+  doseLogs         DoseLog[]
+  emergencyProfile EmergencyProfile?
+  documents        Document[]
+  calendarEvents   CalendarEvent[]
+  streak           Streak?
+  badges           UserBadge[]
+  coinLedger       HealthCoinEntry[]
+
+  @@index([ownerId])
+}
+
+enum ProfileRelation {
+  SELF
+  MOTHER
+  FATHER
+  CHILD
+  GRANDPARENT
+  SPOUSE
+  PET
+  OTHER
+}
+
+// ==========================================================================
+// PHASE 2 — SMART MEDICINE CABINET (manual entry)
+// ==========================================================================
+
+model Medicine {
+  id                   String         @id @default(cuid())
+  profileId            String
+  profile              Profile        @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  name                 String
+  brandName            String?
+  genericName          String?
+  type                 MedicineType
+  dosageAmount         Float
+  dosageUnit           String         // "mg", "ml", "tablet", etc.
+  quantityAvailable    Float
+  quantityUnit         String
+  purchaseDate         DateTime?
+  expiryDate           DateTime
+  batchNumber          String?
+  doctorName           String?
+  prescriptionImageUrl String?
+  storageInstructions  String?
+  notes                String?
+  status               MedicineStatus @default(SAFE)
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+
+  reminders           Reminder[]
+  stockHistory        StockHistory[]
+  refillAlerts        RefillAlert[]
+  expiryNotifications ExpiryNotificationLog[]
+  donations           Donation[]
+
+  @@index([profileId])
+  @@index([expiryDate])
+  @@index([status])
+}
+
+enum MedicineType {
+  TABLET
+  CAPSULE
+  SYRUP
+  INJECTION
+  DROPS
+  OINTMENT
+  INHALER
+  OTHER
+}
+
+enum MedicineStatus {
+  SAFE
+  EXPIRING_SOON
+  EXPIRED
+}
+
+// Tracks which staged expiry notifications (90/60/30/15/7/3/1 days) have
+// already been sent, so the scheduler never double-sends one.
+model ExpiryNotificationLog {
+  id               String   @id @default(cuid())
+  medicineId       String
+  medicine         Medicine @relation(fields: [medicineId], references: [id], onDelete: Cascade)
+  daysBeforeExpiry Int      // one of 90, 60, 30, 15, 7, 3, 1
+  sentAt           DateTime @default(now())
+
+  @@unique([medicineId, daysBeforeExpiry])
+}
+
+// ==========================================================================
+// PHASE 3 — REMINDER & NOTIFICATION SYSTEM
+// ==========================================================================
+
+model Reminder {
+  id           String             @id @default(cuid())
+  profileId    String
+  profile      Profile            @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  medicineId   String
+  medicine     Medicine           @relation(fields: [medicineId], references: [id], onDelete: Cascade)
+  doseAmount   Float
+  doseUnit     String
+  instruction  DoseInstruction    @default(NONE)
+  repeatType   ReminderRepeatType @default(DAILY)
+  daysOfWeek   Int[]              @default([]) // 0=Sun..6=Sat, used when WEEKLY
+  intervalDays Int?               // used when CUSTOM_INTERVAL
+  startDate    DateTime
+  endDate      DateTime?          // used for course-based reminders (e.g. 5-day antibiotic)
+  times        String[]           // e.g. ["08:00", "20:00"]
+  isActive     Boolean            @default(true)
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+
+  doseLogs DoseLog[]
+
+  @@index([profileId])
+  @@index([medicineId])
+}
+
+enum DoseInstruction {
+  NONE
+  BEFORE_FOOD
+  AFTER_FOOD
+  EMPTY_STOMACH
+}
+
+enum ReminderRepeatType {
+  DAILY
+  WEEKLY
+  CUSTOM_INTERVAL
+  COURSE
+}
+
+// One row per scheduled dose occurrence — this is what powers adherence
+// history, streaks, and the daily dashboard checklist.
+model DoseLog {
+  id          String     @id @default(cuid())
+  reminderId  String
+  reminder    Reminder   @relation(fields: [reminderId], references: [id], onDelete: Cascade)
+  profileId   String
+  profile     Profile    @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  scheduledAt DateTime
+  status      DoseStatus @default(PENDING)
+  respondedAt DateTime?
+  snoozeCount Int        @default(0)
+  createdAt   DateTime   @default(now())
+
+  @@index([profileId, scheduledAt])
+  @@index([reminderId])
+  @@index([status])
+}
+
+enum DoseStatus {
+  PENDING
+  TAKEN
+  SKIPPED
+  MISSED
+}
+
+// ==========================================================================
+// PHASE 4 — STOCK TRACKING & REFILL REMINDER (rule-based)
+// ==========================================================================
+
+model StockHistory {
+  id           String             @id @default(cuid())
+  medicineId   String
+  medicine     Medicine           @relation(fields: [medicineId], references: [id], onDelete: Cascade)
+  changeAmount Float              // negative = consumed, positive = restocked
+  reason       StockChangeReason
+  balanceAfter Float
+  createdAt    DateTime           @default(now())
+
+  @@index([medicineId])
+}
+
+enum StockChangeReason {
+  DOSE_TAKEN
+  MANUAL_ADJUSTMENT
+  RESTOCK
+  DONATED
+  DISPOSED
+}
+
+model RefillAlert {
+  id                   String            @id @default(cuid())
+  medicineId           String
+  medicine             Medicine          @relation(fields: [medicineId], references: [id], onDelete: Cascade)
+  daysRemainingAtAlert Int
+  status               RefillAlertStatus @default(PENDING)
+  snoozedUntil         DateTime?
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+
+  @@index([medicineId])
+}
+
+enum RefillAlertStatus {
+  PENDING
+  REORDERED
+  DISMISSED
+  SNOOZED
+}
+
+// ==========================================================================
+// PHASE 6 — EMERGENCY HEALTH WALLET
+// ==========================================================================
+
+model EmergencyProfile {
+  id                     String   @id @default(cuid())
+  profileId              String   @unique
+  profile                Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  bloodGroup             String?
+  allergies              String[] @default([])
+  medicalConditions      String[] @default([])
+  insuranceProvider      String?
+  insurancePolicyNumber  String?
+  primaryDoctorName      String?
+  primaryHospital        String?
+  qrToken                String   @unique @default(cuid()) // powers the public read-only QR view
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  emergencyContacts EmergencyContact[]
+}
+
+model EmergencyContact {
+  id                 String           @id @default(cuid())
+  emergencyProfileId String
+  emergencyProfile   EmergencyProfile @relation(fields: [emergencyProfileId], references: [id], onDelete: Cascade)
+  name               String
+  relation           String
+  phone              String
+}
+
+// ==========================================================================
+// PHASE 7 — PRESCRIPTION & DOCUMENT ORGANIZER (manual tagging, no OCR)
+// ==========================================================================
+
+model Document {
+  id                String       @id @default(cuid())
+  profileId         String
+  profile           Profile      @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  type              DocumentType
+  title             String
+  fileUrl           String
+  relatedDoctorName String?
+  relatedLabName    String?
+  documentDate      DateTime?
+  tags              String[]     @default([])
+  createdAt         DateTime     @default(now())
+
+  @@index([profileId])
+  @@index([type])
+}
+
+enum DocumentType {
+  PRESCRIPTION
+  LAB_REPORT
+  INVOICE
+  XRAY_SCAN
+  OTHER
+}
+
+// ==========================================================================
+// PHASE 8 — SMART CALENDAR
+// ==========================================================================
+
+model CalendarEvent {
+  id                     String            @id @default(cuid())
+  profileId              String
+  profile                Profile           @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  type                   CalendarEventType
+  title                  String
+  description            String?
+  eventDate              DateTime
+  location               String?
+  reminderMinutesBefore  Int?
+  createdAt              DateTime          @default(now())
+
+  @@index([profileId, eventDate])
+}
+
+enum CalendarEventType {
+  DOCTOR_VISIT
+  LAB_TEST
+  VACCINATION
+  REFILL_DUE
+  EXPIRY
+  OTHER
+}
+
+// ==========================================================================
+// PHASE 9 — COMMUNITY MEDICINE DONATION (manual/verified, no AI matching)
+// ==========================================================================
+
+model Donation {
+  id               String         @id @default(cuid())
+  donorUserId      String
+  donorUser        User           @relation("DonorUser", fields: [donorUserId], references: [id], onDelete: Cascade)
+  medicineId       String?
+  medicine         Medicine?      @relation(fields: [medicineId], references: [id])
+  medicineName     String
+  quantity         Float
+  quantityUnit     String
+  photoUrl         String?
+  pickupArea       String
+  status           DonationStatus @default(LISTED)
+  reservedByUserId String?
+  reservedByUser   User?          @relation("ReservedByUser", fields: [reservedByUserId], references: [id])
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  pickup  Pickup?
+  ratings Rating[]
+
+  @@index([donorUserId])
+  @@index([status])
+}
+
+enum DonationStatus {
+  LISTED
+  RESERVED
+  COMPLETED
+  CANCELLED
+}
+
+model DonationRequest {
+  id              String        @id @default(cuid())
+  requesterUserId String
+  requesterUser   User          @relation(fields: [requesterUserId], references: [id], onDelete: Cascade)
+  medicineName    String
+  quantityNeeded  Float
+  quantityUnit    String
+  area            String
+  status          RequestStatus @default(OPEN)
+  createdAt       DateTime      @default(now())
+
+  @@index([requesterUserId])
+}
+
+enum RequestStatus {
+  OPEN
+  FULFILLED
+  CLOSED
+}
+
+model Pickup {
+  id          String       @id @default(cuid())
+  donationId  String       @unique
+  donation    Donation     @relation(fields: [donationId], references: [id], onDelete: Cascade)
+  qrCode      String       @unique @default(cuid())
+  scheduledAt DateTime?
+  status      PickupStatus @default(SCHEDULED)
+  completedAt DateTime?
+}
+
+enum PickupStatus {
+  SCHEDULED
+  VERIFIED
+  COMPLETED
+  CANCELLED
+}
+
+model Rating {
+  id              String    @id @default(cuid())
+  giverUserId     String
+  giverUser       User      @relation("RatingGiver", fields: [giverUserId], references: [id], onDelete: Cascade)
+  receiverUserId  String
+  receiverUser    User      @relation("RatingReceiver", fields: [receiverUserId], references: [id], onDelete: Cascade)
+  donationId      String?
+  donation        Donation? @relation(fields: [donationId], references: [id])
+  score           Int       // 1-5
+  comment         String?
+  createdAt       DateTime  @default(now())
+
+  @@index([receiverUserId])
+}
+
+// Manually curated directory to start — Google Maps API used only for
+// displaying pins/distance, not for AI recommendation.
+model NgoDirectory {
+  id        String   @id @default(cuid())
+  name      String
+  type      NgoType
+  address   String
+  latitude  Float
+  longitude Float
+  phone     String?
+  createdAt DateTime @default(now())
+}
+
+enum NgoType {
+  NGO
+  CHARITY
+  CLINIC
+  HOSPITAL
+  MEDICINE_BANK
+}
+
+// ==========================================================================
+// PHASE 10 — DASHBOARD, GAMIFICATION (rule-based)
+// ==========================================================================
+
+model Streak {
+  id                  String    @id @default(cuid())
+  profileId           String    @unique
+  profile             Profile   @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  currentDailyStreak  Int       @default(0)
+  longestDailyStreak  Int       @default(0)
+  currentWeeklyStreak Int       @default(0)
+  lastActiveDate      DateTime?
+}
+
+model Badge {
+  id          String @id @default(cuid())
+  name        String @unique
+  description String
+  iconUrl     String?
+  ruleKey     String // e.g. "streak_7", "compliance_100_week", "donation_master"
+
+  userBadges UserBadge[]
+}
+
+model UserBadge {
+  id        String   @id @default(cuid())
+  profileId String
+  profile   Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  badgeId   String
+  badge     Badge    @relation(fields: [badgeId], references: [id], onDelete: Cascade)
+  earnedAt  DateTime @default(now())
+
+  @@unique([profileId, badgeId])
+}
+
+model HealthCoinEntry {
+  id        String   @id @default(cuid())
+  profileId String
+  profile   Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  amount    Int      // positive = earned, negative = spent
+  reason    String   // "dose_taken", "donation_completed", "theme_unlock"
+  createdAt DateTime @default(now())
+
+  @@index([profileId])
+}
