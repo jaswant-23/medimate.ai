@@ -25,7 +25,19 @@ export const registerUser = async (req: Request, res: Response): Promise<void> =
     const resolvedName = fullName || name;
 
     if (!resolvedName || !email || !password) {
-      res.status(400).json({ message: 'Please provide all required fields' });
+      res.status(400).json({ 
+        message: 'Please provide all required fields',
+        missing: {
+          name: !resolvedName,
+          email: !email,
+          password: !password
+        },
+        received: {
+          fullName: fullName || name,
+          email,
+          hasPassword: !!password
+        }
+      });
       return;
     }
 
@@ -43,6 +55,7 @@ export const registerUser = async (req: Request, res: Response): Promise<void> =
         fullName: resolvedName,
         email,
         passwordHash: hashedPassword,
+        isEmailVerified: true,
         profiles: {
           create: {
             relation: 'SELF',
@@ -56,24 +69,38 @@ export const registerUser = async (req: Request, res: Response): Promise<void> =
     });
 
     // Generate Verification Token
-    const verificationToken = crypto.randomBytes(32).toString('hex');
-    await prisma.otpVerification.create({
+    // const verificationToken = crypto.randomBytes(32).toString('hex');
+    // await prisma.otpVerification.create({
+    //   data: {
+    //     userId: user.id,
+    //     identifier: user.email!,
+    //     otpCode: verificationToken,
+    //     purpose: 'SIGNUP',
+    //     expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24 hours
+    //   }
+    // });
+
+    // await sendVerificationEmail(user.email!, verificationToken);
+
+    const refreshToken = generateRefreshToken();
+    await prisma.session.create({
       data: {
         userId: user.id,
-        identifier: user.email!,
-        otpCode: verificationToken,
-        purpose: 'SIGNUP',
-        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24 hours
+        refreshToken: refreshToken,
+        userAgent: req.headers['user-agent'] || null,
+        ipAddress: req.ip || null,
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
       }
     });
 
-    await sendVerificationEmail(user.email!, verificationToken);
-
     res.status(201).json({
-      message: 'User registered. Please check your email to verify your account.',
+      message: 'User registered successfully.',
       _id: user.id,
       fullName: user.fullName,
       email: user.email,
+      isEmailVerified: true,
+      token: generateToken(user.id),
+      refreshToken: refreshToken,
     });
   } catch (error: any) {
     res.status(500).json({ message: error.message });

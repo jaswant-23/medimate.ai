@@ -26,8 +26,7 @@ export const Register = () => {
       if (!emailVerificationRequired) {
         const success = await register(name, email, password);
         if (success) {
-          setEmailVerificationRequired(true);
-          setOtpMessage('Registration initiated. Please check your email for the verification link/code.');
+          navigate('/');
         }
       } else {
         const success = await verifyEmail(verificationCode);

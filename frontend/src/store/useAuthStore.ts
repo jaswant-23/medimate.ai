@@ -131,7 +131,22 @@ export const useAuthStore = create<AuthState>()(
             throw new Error(data.message || 'Registration failed');
           }
 
-          set({ isLoading: false });
+          if (data.refreshToken) {
+            localStorage.setItem('refreshToken', data.refreshToken);
+          }
+
+          set({
+            user: {
+              _id: data._id,
+              name: data.fullName,
+              email: data.email,
+              isEmailVerified: data.isEmailVerified || true,
+            },
+            token: data.token,
+            isAuthenticated: true,
+            isLoading: false,
+          });
+
           return true;
         } catch (error: any) {
           set({ error: error.message, isLoading: false });
