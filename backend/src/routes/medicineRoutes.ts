@@ -5,12 +5,17 @@ import {
   deleteMedicine,
   getMedicineById,
   getMedicinesByProfile,
-  adjustStock
+  adjustStock,
+  extractPrescription
 } from '../controllers/medicineController';
 import { protect } from '../middleware/authMiddleware';
-
+import { upload } from '../middleware/upload';
 const router = express.Router();
 
+// Public Routes
+router.post('/extract-prescription', upload.single('prescription'), extractPrescription);
+
+// Protected Routes
 router.use(protect);
 
 router.post('/', addMedicine);

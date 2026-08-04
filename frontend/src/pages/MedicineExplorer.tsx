@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
-import { Search, Heart, Star, Plus, Filter as FilterIcon, ChevronDown, SlidersHorizontal, ToggleRight, ToggleLeft, X } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { Search, Heart, Star, Plus, Filter as FilterIcon, ChevronDown, SlidersHorizontal, ToggleRight, ToggleLeft, X, Scan, Loader2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { useAuthStore } from '../store/useAuthStore';
 
 interface FDADrug {
   id: string;
@@ -20,7 +21,7 @@ const CATEGORIES = [
 ];
 
 const MOCK_IMAGES = [
-  "https://images.unsplash.com/photo-1584308666744-24d5e471d2ea?auto=format&fit=crop&q=80&w=400",
+  "https://images.unsplash.com/photo-1576671081837-49000212a370?auto=format&fit=crop&q=80&w=400", // Replaced broken image
   "https://images.unsplash.com/photo-1550572017-edb9b4a11b8b?auto=format&fit=crop&q=80&w=400",
   "https://images.unsplash.com/photo-1471864190281-a93a3070b6de?auto=format&fit=crop&q=80&w=400",
   "https://images.unsplash.com/photo-1628771065518-0d82f1938462?auto=format&fit=crop&q=80&w=400",
@@ -37,6 +38,9 @@ export const MedicineExplorer = () => {
   const [drugs, setDrugs] = useState<FDADrug[]>([]);
   const [loading, setLoading] = useState(false);
   const [isMobileFiltersOpen, setIsMobileFiltersOpen] = useState(false);
+  const [extractedMedicines, setExtractedMedicines] = useState<string[]>([]);
+  const [isScanning, setIsScanning] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // UI State for Filters
   const [activePriceFilter, setActivePriceFilter] = useState("Any");
@@ -44,20 +48,23 @@ export const MedicineExplorer = () => {
   const [brandSearch, setBrandSearch] = useState('');
 
   useEffect(() => {
-    fetchDrugs();
+    fetchDrugs(searchQuery, extractedMedicines);
     setIsMobileFiltersOpen(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeCategory]);
 
-  const fetchDrugs = async (query = '') => {
+  const fetchDrugs = async (query = '', extraMedicines: string[] = []) => {
     setLoading(true);
     try {
       // Fetch more to account for duplicates we will filter out
       let url = 'https://api.fda.gov/drug/label.json?limit=50';
 
       let searchParts = [];
-      if (query) {
-        searchParts.push(`(openfda.brand_name:${query}*+OR+openfda.generic_name:${query}*)`);
+      const medsToSearch = [...(query ? [query] : []), ...extraMedicines];
+
+      if (medsToSearch.length > 0) {
+        const medQuery = medsToSearch.map(m => `(openfda.brand_name:${m}*+OR+openfda.generic_name:${m}*)`).join('+OR+');
+        searchParts.push(`(${medQuery})`);
       }
 
       if (activeCategory !== "All Products") {
@@ -115,7 +122,53 @@ export const MedicineExplorer = () => {
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    fetchDrugs(searchQuery);
+    fetchDrugs(searchQuery, extractedMedicines);
+  };
+
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setIsScanning(true);
+    const formData = new FormData();
+    formData.append('prescription', file);
+
+    try {
+      const token = useAuthStore.getState().token;
+      const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001';
+      const response = await fetch(`${API_URL}/api/medicines/extract-prescription`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`
+        },
+        body: formData
+      });
+      
+      const data = await response.json();
+      if (data.medicines && data.medicines.length > 0) {
+        setExtractedMedicines(prev => {
+          const newMeds = Array.from(new Set([...prev, ...data.medicines]));
+          fetchDrugs(searchQuery, newMeds);
+          return newMeds;
+        });
+      } else {
+        alert("Could not extract any medicines from the image.");
+      }
+    } catch (error) {
+      console.error("Upload error:", error);
+      alert("Failed to scan prescription.");
+    } finally {
+      setIsScanning(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+  
+  const removeExtractedMedicine = (med: string) => {
+    setExtractedMedicines(prev => {
+      const newMeds = prev.filter(m => m !== med);
+      fetchDrugs(searchQuery, newMeds);
+      return newMeds;
+    });
   };
 
   return (
@@ -146,6 +199,9 @@ export const MedicineExplorer = () => {
               className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl pl-10 pr-3 py-3 outline-none focus:ring-2 focus:ring-primary/40 transition-all text-sm font-semibold text-slate-800 dark:text-slate-200 shadow-sm"
             />
           </div>
+          <button type="button" onClick={() => fileInputRef.current?.click()} className="bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 px-3 py-3 rounded-xl shadow-sm active:scale-95 flex items-center justify-center shrink-0">
+             {isScanning ? <Loader2 size={18} className="animate-spin" /> : <Scan size={18} />}
+          </button>
           <button
             type="submit"
             className="bg-primary hover:bg-primary/90 text-primary-foreground px-5 py-3 rounded-xl font-bold shadow-md shadow-primary/20 text-sm active:scale-95 whitespace-nowrap shrink-0"
@@ -153,6 +209,19 @@ export const MedicineExplorer = () => {
             Go
           </button>
         </form>
+
+        {extractedMedicines.length > 0 && (
+          <div className="flex flex-wrap gap-2 mt-1">
+            {extractedMedicines.map(med => (
+              <span key={med} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-primary/10 text-primary border border-primary/20">
+                {med}
+                <button type="button" onClick={() => removeExtractedMedicine(med)} className="hover:text-primary-focus hover:bg-primary/20 rounded-full p-0.5 transition-colors">
+                  <X size={12} />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="flex flex-col lg:flex-row gap-8 p-4 md:p-6 lg:p-8">
@@ -291,23 +360,46 @@ export const MedicineExplorer = () => {
         {/* RIGHT MAIN CONTENT */}
         <div className="flex-1 w-full min-w-0">
           {/* Desktop Search Bar area */}
-          <div className="hidden lg:flex bg-white dark:bg-slate-900 p-2 pl-5 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800 items-center gap-3 mb-8 focus-within:ring-2 focus-within:ring-primary/30 transition-all">
-            <Search className="text-primary shrink-0" size={20} />
-            <form onSubmit={handleSearch} className="flex-1 flex gap-2 w-full">
-              <input
-                type="text"
-                placeholder="Search for medicines, ingredients, or symptoms..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full bg-transparent outline-none text-slate-700 dark:text-slate-200 py-3 font-semibold placeholder:font-medium placeholder:text-slate-400 min-w-0"
-              />
-              <button
-                type="submit"
-                className="bg-primary hover:bg-primary/90 text-primary-foreground px-8 py-3 rounded-xl font-bold shadow-md shadow-primary/20 transition-all active:scale-95 whitespace-nowrap shrink-0"
-              >
-                Search
-              </button>
-            </form>
+          <div className="hidden lg:flex flex-col gap-3 mb-8">
+            <div className="flex bg-white dark:bg-slate-900 p-2 pl-5 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800 items-center gap-3 focus-within:ring-2 focus-within:ring-primary/30 transition-all">
+              <Search className="text-primary shrink-0" size={20} />
+              <form onSubmit={handleSearch} className="flex-1 flex gap-2 w-full">
+                <input
+                  type="text"
+                  placeholder="Search for medicines, ingredients, or symptoms..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full bg-transparent outline-none text-slate-700 dark:text-slate-200 py-3 font-semibold placeholder:font-medium placeholder:text-slate-400 min-w-0"
+                />
+                
+                <input type="file" ref={fileInputRef} accept="image/*" capture="environment" className="hidden" onChange={handleFileUpload} />
+                <button type="button" onClick={() => fileInputRef.current?.click()} className="bg-slate-100 hover:bg-slate-200 text-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-300 px-4 py-3 rounded-xl font-bold shadow-sm transition-all active:scale-95 whitespace-nowrap shrink-0 flex items-center gap-2">
+                  {isScanning ? <Loader2 size={18} className="animate-spin" /> : <Scan size={18} />}
+                  Scan
+                </button>
+
+                <button
+                  type="submit"
+                  className="bg-primary hover:bg-primary/90 text-primary-foreground px-8 py-3 rounded-xl font-bold shadow-md shadow-primary/20 transition-all active:scale-95 whitespace-nowrap shrink-0"
+                >
+                  Search
+                </button>
+              </form>
+            </div>
+            
+            {extractedMedicines.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                <span className="text-sm font-bold text-slate-400 flex items-center mr-2">Scanned:</span>
+                {extractedMedicines.map(med => (
+                  <span key={med} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-bold bg-primary/10 text-primary border border-primary/20 shadow-sm animate-in fade-in zoom-in duration-300">
+                    {med}
+                    <button type="button" onClick={() => removeExtractedMedicine(med)} className="hover:text-primary-focus hover:bg-primary/20 rounded-full p-1 transition-colors">
+                      <X size={14} />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Mobile Search Bar moved to Sticky Header */}
@@ -369,7 +461,9 @@ export const MedicineExplorer = () => {
                           alt={drug.brand_name}
                           className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-[1.05] text-transparent"
                           onError={(e) => {
-                            (e.target as HTMLImageElement).src = "https://images.unsplash.com/photo-1584308666744-24d5e471d2ea?auto=format&fit=crop&q=80&w=400";
+                            const target = e.target as HTMLImageElement;
+                            target.onerror = null; // Prevent infinite loop if fallback fails
+                            target.src = "https://images.unsplash.com/photo-1576671081837-49000212a370?auto=format&fit=crop&q=80&w=400";
                           }}
                         />
                       </div>

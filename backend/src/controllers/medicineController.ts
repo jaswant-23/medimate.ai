@@ -1,4 +1,6 @@
 import { Request, Response } from 'express';
+import Tesseract from 'tesseract.js';
+import fs from 'fs';
 import { PrismaClient, MedicineStatus, MedicineType, StockChangeReason } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { AuthRequest } from '../middleware/authMiddleware';
@@ -20,6 +22,82 @@ const calculateMedicineStatus = (expiryDate: Date, expiringSoonDays: number = 30
     return 'EXPIRING_SOON';
   } else {
     return 'SAFE';
+  }
+};
+
+export const extractPrescription = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    if (!req.file) {
+      res.status(400).json({ message: 'No image uploaded' });
+      return;
+    }
+
+    const imagePath = req.file.path;
+    
+    // Run OCR
+    const { data: { text } } = await Tesseract.recognize(imagePath, 'eng');
+    console.log("--- OCR Raw Text ---");
+    console.log(text);
+    console.log("--------------------");
+    
+    // Cleanup the uploaded file after OCR
+    fs.unlinkSync(imagePath);
+
+    // Basic NLP / Smart Filtering to get potential medicine names
+    const lines = text.split('\n').map(line => line.trim());
+    const stopWords = ['NAME', 'DATE', 'AGE', 'GENDER', 'MALE', 'FEMALE', 'DIAGNOSIS', 'SYMPTOM', 'TABLET', 'SYRUP', 'CAPSULE', 'DAILY', 'TAKE', 'DAY', 'REFILL', 'DOCTOR', 'PATIENT', 'CLINIC', 'HOSPITAL', 'ADVICE', 'TESTS'];
+    
+    let rawMedicines: string[] = [];
+
+    // Strategy 1: Look for numbered lists (e.g., "1. Augmentin")
+    const numberedRegex = /^\d+[\.\)]\s*([a-zA-Z]{2,})/i;
+    lines.forEach(line => {
+      const match = line.match(numberedRegex);
+      if (match && match[1]) {
+        rawMedicines.push(match[1].toUpperCase());
+      }
+    });
+
+    // Strategy 2: Look for dosage indicators on the line if Strategy 1 found nothing
+    if (rawMedicines.length === 0) {
+      lines.forEach(line => {
+        const lowerLine = line.toLowerCase();
+        if (lowerLine.match(/\b(mg|ml|tablet|capsule|syrup|drop)\b/)) {
+           const words = line.replace(/[^a-zA-Z\s]/g, ' ').trim().split(/\s+/);
+           // Try to grab the first valid word
+           for (const word of words) {
+             if (word.length > 2 && !stopWords.includes(word.toUpperCase())) {
+               rawMedicines.push(word.toUpperCase());
+               break; // only take the first valid word of the line
+             }
+           }
+        }
+      });
+    }
+
+    // Strategy 3: Fallback (Aggressive filtering)
+    if (rawMedicines.length === 0) {
+      lines.forEach(line => {
+        const words = line.replace(/[^a-zA-Z\s]/g, ' ').trim().split(/\s+/);
+        words.forEach(word => {
+          // In medical prescriptions, medicines are often fully uppercase or capitalized
+          if (word.length > 4 && word === word.toUpperCase() && !stopWords.includes(word.toUpperCase())) {
+             rawMedicines.push(word.toUpperCase());
+          }
+        });
+      });
+    }
+
+    // Deduplicate and format
+    const extractedMedicines = [...new Set(rawMedicines)]
+      .filter(med => !stopWords.includes(med))
+      .map(med => med.charAt(0) + med.slice(1).toLowerCase());
+
+    console.log("Extracted Medicines: ", extractedMedicines);
+    res.json({ text, medicines: extractedMedicines });
+  } catch (error: any) {
+    console.error("OCR Error:", error);
+    res.status(500).json({ message: 'Failed to process prescription image', error: error.message });
   }
 };
 
