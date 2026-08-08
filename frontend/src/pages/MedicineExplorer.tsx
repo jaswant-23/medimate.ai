@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { Search, Heart, Star, Plus, Filter as FilterIcon, ChevronDown, SlidersHorizontal, ToggleRight, ToggleLeft, X, Scan, Loader2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { useAuthStore } from '../store/useAuthStore';
 import { extractMedicinesFromImage } from '../utils/ocrService';
 
 interface FDADrug {

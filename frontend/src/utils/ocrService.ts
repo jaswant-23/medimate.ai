@@ -11,14 +11,6 @@
 const OCR_API_URL = 'https://api.ocr.space/parse/image';
 const MAX_FILE_SIZE_BYTES = 1 * 1024 * 1024; // 1 MB (free-tier limit)
 
-// ── Stop-words that should never be treated as medicine names ──
-const STOP_WORDS = [
-  'NAME', 'DATE', 'AGE', 'GENDER', 'MALE', 'FEMALE',
-  'DIAGNOSIS', 'SYMPTOM', 'TABLET', 'SYRUP', 'CAPSULE',
-  'DAILY', 'TAKE', 'DAY', 'REFILL', 'DOCTOR', 'PATIENT',
-  'CLINIC', 'HOSPITAL', 'ADVICE', 'TESTS',
-];
-
 export interface OcrResult {
   /** Raw text returned by the OCR engine */
   text: string;
@@ -147,7 +139,7 @@ function isValidMedicineName(name: string): boolean {
   // Reject if the entire name is a single header word
   if (HEADER_WORDS.includes(upper)) return false;
   // Reject if it's only numbers / special chars
-  if (/^[\d\s.,;:\-]+$/.test(name)) return false;
+  if (/^[\d\s.,;:-]+$/.test(name)) return false;
   return true;
 }
 
