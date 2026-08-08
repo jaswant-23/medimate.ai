@@ -1,8 +1,41 @@
-node_modules
-# Keep environment variables out of version control
+# ── Environment variables ──
 .env
+.env.*
+!.env.example
 
-/src/generated/prisma
+# ── Dependencies ──
+node_modules/
 
-# Ignore all markdown files
-*.md
+# ── Prisma generated ──
+/src/generated/prisma/
+
+# ── Uploads (user content) ──
+uploads/
+!uploads/.gitkeep
+
+# ── OCR training data ──
+*.traineddata
+
+# ── Build output ──
+dist/
+
+# ── Logs ──
+logs/
+*.log
+
+# ── Editor / IDE ──
+.vscode/
+.idea/
+.DS_Store
+*.sw?
+
+# ── Agent configs ──
+.agents/
+.claude/
+.windsurf/
+skills-lock.json
+
+# ── Misc ──
+*.local
+*.tsbuildinfo
+coverage/
