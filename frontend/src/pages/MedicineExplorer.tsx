@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Search, Heart, Star, Plus, Filter as FilterIcon, ChevronDown, SlidersHorizontal, ToggleRight, ToggleLeft, X, Scan, Loader2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/useAuthStore';
+import { extractMedicinesFromImage } from '../utils/ocrService';
 
 interface FDADrug {
   id: string;
@@ -53,18 +54,101 @@ export const MedicineExplorer = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeCategory]);
 
+  /**
+   * Build an FDA openFDA search clause for a single search term.
+   * Handles both single-word and multi-word inputs properly.
+   */
+  const buildFdaQuery = (term: string): string[] => {
+    const clauses: string[] = [];
+    const t = term.trim();
+    if (!t) return clauses;
+
+    // Only skip true articles/prepositions — never skip potential brand words
+    const NOISE_WORDS = new Set(['the', 'a', 'an', 'and', 'or', 'for', 'of', 'in', 'on', 'to', 'by', 'is', 'at']);
+
+    if (t.includes(' ')) {
+      // 1. Exact phrase match (highest priority)
+      clauses.push(`(openfda.brand_name:"${t}"+OR+openfda.generic_name:"${t}")`);
+
+      // 2. All meaningful words combined with AND (strong match)
+      const words = t.split(/\s+/).filter(w => w.length > 1 && !NOISE_WORDS.has(w.toLowerCase()));
+      if (words.length >= 2) {
+        const andParts = words.map(w => `(openfda.brand_name:${w}*+OR+openfda.generic_name:${w}*)`).join('+AND+');
+        clauses.push(`(${andParts})`);
+      }
+
+      // 3. Each individual word (broadest — OR'd together for fallback)
+      for (const word of words) {
+        clauses.push(`(openfda.brand_name:${word}*+OR+openfda.generic_name:${word}*)`);
+      }
+    } else {
+      // Single word — simple wildcard search
+      clauses.push(`(openfda.brand_name:${t}*+OR+openfda.generic_name:${t}*)`);
+    }
+
+    return clauses;
+  };
+
+  /**
+   * Score how relevant an FDA result is to the original search terms.
+   * Higher score = closer match.
+   */
+  const scoreRelevance = (brand: string, generic: string, searchTerms: string[]): number => {
+    let score = 0;
+    const brandLower = brand.toLowerCase();
+    const genericLower = generic.toLowerCase();
+
+    for (const term of searchTerms) {
+      const termLower = term.toLowerCase().trim();
+      if (!termLower) continue;
+
+      // Exact brand match → highest score
+      if (brandLower === termLower) { score += 100; continue; }
+      // Exact generic match
+      if (genericLower === termLower) { score += 90; continue; }
+      // Brand starts with the search term
+      if (brandLower.startsWith(termLower)) { score += 70; continue; }
+      // Brand contains the full search term as a substring
+      if (brandLower.includes(termLower)) { score += 50; continue; }
+      // Generic contains the full search term
+      if (genericLower.includes(termLower)) { score += 40; continue; }
+
+      // Check individual words from the search term
+      const words = termLower.split(/\s+/);
+      let wordHits = 0;
+      for (const w of words) {
+        if (w.length > 1 && (brandLower.includes(w) || genericLower.includes(w))) {
+          wordHits++;
+        }
+      }
+      // Score based on what fraction of words matched
+      if (words.length > 0) {
+        score += Math.round((wordHits / words.length) * 30);
+      }
+    }
+
+    return score;
+  };
+
   const fetchDrugs = async (query = '', extraMedicines: string[] = []) => {
     setLoading(true);
     try {
-      // Fetch more to account for duplicates we will filter out
-      let url = 'https://api.fda.gov/drug/label.json?limit=50';
+      const medsToSearch = [...(query ? [query] : []), ...extraMedicines].filter(Boolean);
 
-      let searchParts = [];
-      const medsToSearch = [...(query ? [query] : []), ...extraMedicines];
+      let url = 'https://api.fda.gov/drug/label.json?limit=50';
+      let searchParts: string[] = [];
 
       if (medsToSearch.length > 0) {
-        const medQuery = medsToSearch.map(m => `(openfda.brand_name:${m}*+OR+openfda.generic_name:${m}*)`).join('+OR+');
-        searchParts.push(`(${medQuery})`);
+        const allClauses: string[] = [];
+        for (const med of medsToSearch) {
+          allClauses.push(...buildFdaQuery(med));
+        }
+
+        // Deduplicate clauses
+        const uniqueClauses = [...new Set(allClauses)];
+        if (uniqueClauses.length > 0) {
+          searchParts.push(`(${uniqueClauses.join('+OR+')})`);
+        }
       }
 
       if (activeCategory !== "All Products") {
@@ -78,6 +162,8 @@ export const MedicineExplorer = () => {
         url += '&search=_exists_:openfda.brand_name';
       }
 
+      console.log('[FDA Search] URL:', url);
+
       const response = await fetch(url);
       const data = await response.json();
 
@@ -90,7 +176,6 @@ export const MedicineExplorer = () => {
             const brand = item.openfda.brand_name[0];
             const generic = item.openfda.generic_name?.[0] || '';
 
-            // Create a unique key for the product to prevent repeats
             const uniqueKey = `${brand.toLowerCase()}-${generic.toLowerCase()}`;
 
             if (!uniqueBrands.has(uniqueKey)) {
@@ -105,10 +190,19 @@ export const MedicineExplorer = () => {
               });
             }
           }
-          if (parsedDrugs.length >= 12) break; // limit to 12 unique items for UI
         }
 
-        setDrugs(parsedDrugs);
+        // Sort by relevance if we have search terms
+        if (medsToSearch.length > 0) {
+          parsedDrugs.sort((a, b) => {
+            const scoreA = scoreRelevance(a.brand_name, a.generic_name, medsToSearch);
+            const scoreB = scoreRelevance(b.brand_name, b.generic_name, medsToSearch);
+            return scoreB - scoreA; // highest score first
+          });
+        }
+
+        // Take top 12 most relevant results
+        setDrugs(parsedDrugs.slice(0, 12));
       } else {
         setDrugs([]);
       }
@@ -130,21 +224,10 @@ export const MedicineExplorer = () => {
     if (!file) return;
 
     setIsScanning(true);
-    const formData = new FormData();
-    formData.append('prescription', file);
 
     try {
-      const token = useAuthStore.getState().token;
-      const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001';
-      const response = await fetch(`${API_URL}/api/medicines/extract-prescription`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`
-        },
-        body: formData
-      });
-      
-      const data = await response.json();
+      const data = await extractMedicinesFromImage(file);
+
       if (data.medicines && data.medicines.length > 0) {
         setExtractedMedicines(prev => {
           const newMeds = Array.from(new Set([...prev, ...data.medicines]));
@@ -152,11 +235,11 @@ export const MedicineExplorer = () => {
           return newMeds;
         });
       } else {
-        alert("Could not extract any medicines from the image.");
+        alert("Could not extract any medicines from the image. Try a clearer photo.");
       }
-    } catch (error) {
-      console.error("Upload error:", error);
-      alert("Failed to scan prescription.");
+    } catch (error: any) {
+      console.error("OCR error:", error);
+      alert(error.message || "Failed to scan prescription.");
     } finally {
       setIsScanning(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
