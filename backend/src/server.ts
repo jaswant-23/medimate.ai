@@ -6,6 +6,7 @@ import authRoutes from './routes/authRoutes';
 import medicineRoutes from './routes/medicineRoutes';
 import reminderRoutes from './routes/reminderRoutes';
 import refillRoutes from './routes/refillRoutes';
+import prescriptionRoutes from './routes/prescriptionRoutes';
 
 const app = express();
 
@@ -27,6 +28,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/medicines', medicineRoutes);
 app.use('/api/reminders', reminderRoutes);
 app.use('/api/refills', refillRoutes);
+app.use('/api/prescription', prescriptionRoutes);
 
 app.get('/', (req, res) => {
   res.send('MediMate AI API is running...');
