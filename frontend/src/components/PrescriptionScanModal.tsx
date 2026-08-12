@@ -179,7 +179,7 @@ export function PrescriptionScanModal({
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept="image/*"
+                  accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
                   className="hidden"
                   onChange={handleFileInputChange}
                   id="prescription-file-input"
