@@ -35,6 +35,7 @@ export function PrescriptionScanModal({
   const [dragOver, setDragOver] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
 
   if (!isOpen) return null;
 
@@ -76,6 +77,7 @@ export function PrescriptionScanModal({
     const file = e.target.files?.[0];
     if (file) handleFileSelect(file);
     if (fileInputRef.current) fileInputRef.current.value = '';
+    if (cameraInputRef.current) cameraInputRef.current.value = '';
   };
 
   const handleDrop = (e: React.DragEvent) => {
@@ -178,10 +180,18 @@ export function PrescriptionScanModal({
                   ref={fileInputRef}
                   type="file"
                   accept="image/*"
-                  capture="environment"
                   className="hidden"
                   onChange={handleFileInputChange}
                   id="prescription-file-input"
+                />
+                <input
+                  ref={cameraInputRef}
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  className="hidden"
+                  onChange={handleFileInputChange}
+                  id="prescription-camera-input"
                 />
                 <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-4">
                   <Upload size={28} className="text-primary" />
@@ -210,10 +220,7 @@ export function PrescriptionScanModal({
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
-                      if (fileInputRef.current) {
-                        fileInputRef.current.capture = 'environment';
-                        fileInputRef.current.click();
-                      }
+                      cameraInputRef.current?.click();
                     }}
                     className="flex items-center gap-2 px-5 py-2.5 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-xl font-bold text-sm hover:bg-slate-200 dark:hover:bg-slate-700 transition-all active:scale-95"
                   >
